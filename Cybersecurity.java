@@ -1,16 +1,51 @@
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.NoSuchElementException;
+import java.util.Queue;
 import java.util.Scanner;
 
 public class Cybersecurity {
     public static void main(String[] args) {
         Scanner scanner = new Scanner(System.in);
-        IncidentManager manager = new IncidentManager(scanner);
-        manager.run();
-        scanner.close();
+        try {
+            IncidentManager manager = new IncidentManager(scanner);
+            manager.run();
+        } catch (Exception e) {
+            System.out.println("Unexpected error: " + e.getMessage());
+        } finally {
+            scanner.close();
+        }
     }
 }
 
-abstract class SecurityIncident {
+class InvalidInputException extends Exception {
+    public InvalidInputException(String message) {
+        super(message);
+    }
+}
+
+class IncidentNotFoundException extends Exception {
+    public IncidentNotFoundException(int id) {
+        super("Incident not found (ID: " + id + ").");
+    }
+}
+
+class IncidentClosedException extends Exception {
+    public IncidentClosedException(String message) {
+        super(message);
+    }
+}
+
+interface Reportable {
+    String generateReport();
+}
+
+interface Escalatable {
+    boolean requiresEscalation();
+}
+
+abstract class SecurityIncident implements Reportable, Escalatable {
     private int id;
     private String reporter;
     private String description;
@@ -55,6 +90,36 @@ abstract class SecurityIncident {
 
     public abstract String getIncidentType();
     public abstract String recommendResponse();
+    public abstract int getBaseRiskScore();
+
+    public int calculateRiskScore() {
+        int weight;
+        switch (severity) {
+            case "Medium":
+                weight = 1;
+                break;
+            case "High":
+                weight = 2;
+                break;
+            case "Critical":
+                weight = 3;
+                break;
+            default:
+                weight = 0;
+        }
+        return getBaseRiskScore() + weight;
+    }
+
+    @Override
+    public boolean requiresEscalation() {
+        return severity.equals("High") || severity.equals("Critical");
+    }
+
+    @Override
+    public String generateReport() {
+        return "#" + id + " [" + getIncidentType() + "] Severity: " + severity
+                + " | Status: " + status + " | Reporter: " + reporter;
+    }
 
     public void displayDetails() {
         System.out.println("\nIncident ID: " + id);
@@ -63,8 +128,17 @@ abstract class SecurityIncident {
         System.out.println("Description: " + description);
         System.out.println("Severity: " + severity);
         System.out.println("Status: " + status);
+        System.out.println("Risk Score: " + calculateRiskScore());
         System.out.println("Recommended Response: " + recommendResponse());
         System.out.println("-----------------------------------");
+    }
+
+    public void displayDetails(boolean brief) {
+        if (brief) {
+            System.out.println(generateReport());
+        } else {
+            displayDetails();
+        }
     }
 }
 
@@ -82,6 +156,11 @@ class MalwareIncident extends SecurityIncident {
     public String recommendResponse() {
         return "Isolate the affected device and scan it using approved security software.";
     }
+
+    @Override
+    public int getBaseRiskScore() {
+        return 7;
+    }
 }
 
 class PhishingIncident extends SecurityIncident {
@@ -97,6 +176,11 @@ class PhishingIncident extends SecurityIncident {
     @Override
     public String recommendResponse() {
         return "Avoid clicking suspicious links and report the message to the security team.";
+    }
+
+    @Override
+    public int getBaseRiskScore() {
+        return 5;
     }
 }
 
@@ -114,11 +198,19 @@ class UnauthorizedAccessIncident extends SecurityIncident {
     public String recommendResponse() {
         return "Review access logs, secure the affected account, and investigate suspicious activity.";
     }
+
+    @Override
+    public int getBaseRiskScore() {
+        return 8;
+    }
 }
 
-
 class IncidentManager {
+    private static final int EXIT_CHOICE = 10;
+
     private ArrayList<SecurityIncident> incidents = new ArrayList<>();
+    private HashMap<Integer, SecurityIncident> incidentMap = new HashMap<>();
+    private Queue<SecurityIncident> escalationQueue = new LinkedList<>();
     private Scanner scanner;
     private int nextId = 1;
 
@@ -127,7 +219,7 @@ class IncidentManager {
     }
 
     public void run() {
-        int choice;
+        int choice = 0;
 
         do {
             System.out.println("\n===== CYBERSECURITY INCIDENT SYSTEM =====");
@@ -138,42 +230,63 @@ class IncidentManager {
             System.out.println("5. Update Investigation Status");
             System.out.println("6. View High-Severity Incidents");
             System.out.println("7. Close Incident");
-            System.out.println("8. Exit");
+            System.out.println("8. Delete Incident");
+            System.out.println("9. Process Next Escalation");
+            System.out.println("10. Exit");
 
-            choice = readInt("Enter your choice: ");
+            try {
+                choice = readInt("Enter your choice: ");
 
-            switch (choice) {
-                case 1:
-                    reportIncident();
-                    break;
-                case 2:
-                    viewAllIncidents();
-                    break;
-                case 3:
-                    searchIncident();
-                    break;
-                case 4:
-                    assignSeverity();
-                    break;
-                case 5:
-                    updateStatus();
-                    break;
-                case 6:
-                    viewHighSeverityIncidents();
-                    break;
-                case 7:
-                    closeIncident();
-                    break;
-                case 8:
-                    System.out.println("Exiting Cybersecurity Incident System.");
-                    break;
-                default:
-                    System.out.println("Invalid choice. Please select 1 to 8.");
+                switch (choice) {
+                    case 1:
+                        reportIncident();
+                        break;
+                    case 2:
+                        viewAllIncidents();
+                        break;
+                    case 3:
+                        searchIncident();
+                        break;
+                    case 4:
+                        assignSeverity();
+                        break;
+                    case 5:
+                        updateStatus();
+                        break;
+                    case 6:
+                        viewHighSeverityIncidents();
+                        break;
+                    case 7:
+                        closeIncident();
+                        break;
+                    case 8:
+                        deleteIncident();
+                        break;
+                    case 9:
+                        processNextEscalation();
+                        break;
+                    case EXIT_CHOICE:
+                        System.out.println("Exiting Cybersecurity Incident System.");
+                        break;
+                    default:
+                        throw new InvalidInputException("Invalid choice. Please select 1 to 10.");
+                }
+            } catch (InvalidInputException | IncidentNotFoundException | IncidentClosedException e) {
+                System.out.println("Error: " + e.getMessage());
+            } catch (NoSuchElementException e) {
+                System.out.println("\nInput ended unexpectedly. Exiting.");
+                choice = EXIT_CHOICE;
+            } catch (Exception e) {
+                System.out.println("Unexpected error: " + e.getMessage());
+            } finally {
+                if (choice != EXIT_CHOICE) {
+                    System.out.println("(Returning to main menu...)");
+                }
             }
-        } while (choice != 8);
+        } while (choice != EXIT_CHOICE);
     }
 
-    private void reportIncident() {
+    private void reportIncident() throws InvalidInputException {
         System.out.println("\nIncident Types");
         System.out.println("1. Malware");
         System.out.println("2. Phishing");
@@ -182,24 +295,21 @@ class IncidentManager {
         int type = readInt("Choose incident type: ");
 
         if (type < 1 || type > 3) {
-            System.out.println("Invalid incident type.");
-            return;
+            throw new InvalidInputException("Invalid incident type.");
         }
 
         System.out.print("Enter reporter name: ");
         String reporter = scanner.nextLine().trim();
 
         if (reporter.isEmpty()) {
-            System.out.println("Reporter name cannot be empty.");
-            return;
+            throw new InvalidInputException("Reporter name cannot be empty.");
         }
 
         System.out.print("Describe the incident: ");
         String description = scanner.nextLine().trim();
 
         if (description.isEmpty()) {
-            System.out.println("Incident description cannot be empty.");
-            return;
+            throw new InvalidInputException("Incident description cannot be empty.");
         }
 
         SecurityIncident incident;
@@ -223,6 +333,7 @@ class IncidentManager {
         }
 
         incidents.add(incident);
+        incidentMap.put(incident.getId(), incident);
 
         System.out.println("Incident reported successfully.");
         System.out.println("Assigned Incident ID: " + nextId);
@@ -241,29 +352,19 @@ class IncidentManager {
         }
     }
 
-    private void searchIncident() {
+    private void searchIncident() throws InvalidInputException, IncidentNotFoundException {
         int id = readInt("Enter incident ID: ");
         SecurityIncident incident = findIncident(id);
-
-        if (incident == null) {
-            System.out.println("Incident not found.");
-        } else {
-            incident.displayDetails();
-        }
+        incident.displayDetails();
     }
 
-    private void assignSeverity() {
+    private void assignSeverity()
+            throws InvalidInputException, IncidentNotFoundException, IncidentClosedException {
         int id = readInt("Enter incident ID: ");
         SecurityIncident incident = findIncident(id);
 
-        if (incident == null) {
-            System.out.println("Incident not found.");
-            return;
-        }
-
         if (incident.getStatus().equals("Closed")) {
-            System.out.println("Cannot change the severity of a closed incident.");
-            return;
+            throw new IncidentClosedException("Cannot change the severity of a closed incident.");
         }
 
         System.out.println("1. Low");
@@ -288,26 +389,25 @@ class IncidentManager {
                 severity = "Critical";
                 break;
             default:
-                System.out.println("Invalid severity choice.");
-                return;
+                throw new InvalidInputException("Invalid severity choice.");
         }
 
         incident.setSeverity(severity);
         System.out.println("Severity updated to " + severity + ".");
+
+        if (incident.requiresEscalation() && !escalationQueue.contains(incident)) {
+            escalationQueue.add(incident);
+            System.out.println("Incident #" + id + " added to the escalation queue.");
+        }
     }
 
-    private void updateStatus() {
+    private void updateStatus()
+            throws InvalidInputException, IncidentNotFoundException, IncidentClosedException {
         int id = readInt("Enter incident ID: ");
         SecurityIncident incident = findIncident(id);
 
-        if (incident == null) {
-            System.out.println("Incident not found.");
-            return;
-        }
-
         if (incident.getStatus().equals("Closed")) {
-            System.out.println("This incident is already closed.");
-            return;
+            throw new IncidentClosedException("This incident is already closed.");
         }
 
         System.out.println("1. Open");
@@ -328,8 +428,7 @@ class IncidentManager {
                 status = "Resolved";
                 break;
             default:
-                System.out.println("Invalid status choice.");
-                return;
+                throw new InvalidInputException("Invalid status choice.");
         }
 
         incident.setStatus(status);
@@ -340,8 +439,7 @@ class IncidentManager {
         boolean found = false;
 
         for (SecurityIncident incident : incidents) {
-            if (incident.getSeverity().equals("High")
-                    || incident.getSeverity().equals("Critical")) {
+            if (incident.requiresEscalation()) {
                 incident.displayDetails();
                 found = true;
             }
@@ -352,44 +450,76 @@ class IncidentManager {
         }
     }
 
-    private void closeIncident() {
+    private void closeIncident()
+            throws InvalidInputException, IncidentNotFoundException, IncidentClosedException {
         int id = readInt("Enter incident ID to close: ");
         SecurityIncident incident = findIncident(id);
 
-        if (incident == null) {
-            System.out.println("Incident not found.");
-            return;
-        }
-
         if (incident.getStatus().equals("Closed")) {
-            System.out.println("This incident is already closed.");
-            return;
+            throw new IncidentClosedException("This incident is already closed.");
         }
 
         incident.setStatus("Closed");
+        escalationQueue.remove(incident);
         System.out.println("Incident #" + id + " has been closed.");
     }
 
-    private SecurityIncident findIncident(int id) {
-        for (SecurityIncident incident : incidents) {
-            if (incident.getId() == id) {
-                return incident;
+    private void deleteIncident() throws InvalidInputException, IncidentNotFoundException {
+        int id = readInt("Enter incident ID to delete: ");
+        SecurityIncident incident = findIncident(id);
+
+        incident.displayDetails(true);
+        System.out.print("Delete this incident permanently? (yes/no): ");
+        String confirm = scanner.nextLine().trim();
+
+        if (confirm.equalsIgnoreCase("yes") || confirm.equalsIgnoreCase("y")) {
+            incidents.remove(incident);
+            incidentMap.remove(id);
+            escalationQueue.remove(incident);
+            System.out.println("Incident #" + id + " has been deleted.");
+        } else {
+            System.out.println("Deletion cancelled.");
+        }
+    }
+
+    private void processNextEscalation() {
+        SecurityIncident incident;
+
+        while ((incident = escalationQueue.poll()) != null) {
+            if (!incident.getStatus().equals("Closed") && incident.requiresEscalation()) {
+                System.out.println("Escalating next incident for review:");
+                incident.displayDetails();
+
+                if (incident.getStatus().equals("Open")) {
+                    incident.setStatus("Under Investigation");
+                    System.out.println("Status changed to Under Investigation.");
+                }
+                System.out.println("Incidents still waiting in queue: " + escalationQueue.size());
+                return;
             }
         }
 
-        return null;
+        System.out.println("No incidents are waiting for escalation.");
     }
 
-    private int readInt(String prompt) {
-        while (true) {
-            System.out.print(prompt);
-            String input = scanner.nextLine().trim();
+    private SecurityIncident findIncident(int id) throws IncidentNotFoundException {
+        SecurityIncident incident = incidentMap.get(id);
 
-            try {
-                return Integer.parseInt(input);
-            } catch (NumberFormatException e) {
-                System.out.println("Please enter a valid whole number.");
-            }
+        if (incident == null) {
+            throw new IncidentNotFoundException(id);
+        }
+
+        return incident;
+    }
+
+    private int readInt(String prompt) throws InvalidInputException {
+        System.out.print(prompt);
+        String input = scanner.nextLine().trim();
+
+        try {
+            return Integer.parseInt(input);
+        } catch (NumberFormatException e) {
+            throw new InvalidInputException("Please enter a valid whole number.");
         }
     }
 }
